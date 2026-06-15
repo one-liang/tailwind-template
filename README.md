@@ -19,12 +19,14 @@ npm install
 npm run dev
 npm run build
 npm run preview
+npm run deploy
 npm run check
 ```
 
 - `npm run dev`：啟動 Vite 開發伺服器，網址是 `http://localhost:3000/`。
 - `npm run build`：建置靜態網站到 `dist/`。
 - `npm run preview`：啟動 `dist/` 的靜態預覽伺服器，預設是 `http://127.0.0.1:4173/`，可用 `PORT` 與 `HOST` 環境變數覆寫。
+- `npm run deploy`：重新建置，並把 `dist/` 內容發佈到 `demo` 分支供 GitHub Pages demo（見下方「部署到 GitHub Pages」）。
 - `npm run check`：執行 node 測試、建置網站，並檢查 `dist/` 輸出是否符合基本規則。
 
 ## 專案結構
@@ -139,6 +141,7 @@ src/pages/news/detail.html  -> src/js/news/detail.js
 - `scripts/dev.mjs`：建立 Vite dev server，實際 host、port 與 watch 設定來自 `vite.config.js`。
 - `scripts/build.mjs`：呼叫 builder 核心，將 `src/pages/**/*.html` 建置到 `dist/`。
 - `scripts/preview.mjs`：用 Node.js HTTP server 預覽已建置的 `dist/` 靜態檔案。
+- `scripts/deploy.mjs`：重新建置後，用 git worktree 把 `dist/` 內容攤平發佈到 `demo` 分支並 push（供 GitHub Pages）。可用 `DEPLOY_BRANCH`、`DEPLOY_REMOTE` 環境變數覆寫目標分支與遠端。
 - `scripts/check.mjs`：檢查 `dist/` 是否有基本輸出品質，例如頁面有載入 CSS、沒有殘留原始 component tag、輸出維持可讀換行。
 - `scripts/builder-core.mjs`：builder 核心，負責讀取設定、尋找頁面、渲染組件、收集 CSS/JS、編譯 Tailwind、改寫 asset URL、輸出 `dist/`。
 - `scripts/vite-builder-plugin.mjs`：Vite 開發模式 plugin，提供 dev middleware、即時渲染頁面、提供虛擬 CSS/JS 路徑，並在來源檔變更時觸發 full reload。
@@ -167,4 +170,24 @@ dist/assets/images/*
 dist/assets/fonts/*
 ```
 
-`dist/` 可以直接部署到靜態主機，也可以用 `npm run preview` 在本機檢查建置結果。
+`dist/` 可以直接部署到靜態主機，也可以用 `npm run preview` 在本機檢查建置結果。輸出的所有路徑都是相對路徑（`./assets/...`、`./about.html`），因此可以直接用瀏覽器打開 `dist/index.html` 瀏覽，也能放在任意子路徑下提供服務，不需要設定 base path。
+
+## 部署到 GitHub Pages
+
+`dist/` 在 `main` 上是 gitignored 的產生物，發佈時不直接 commit 到 `main`，而是透過 `demo` 分支：
+
+```bash
+npm run deploy
+```
+
+這個指令會：
+
+1. 重新跑一次 build 產生最新的 `dist/`。
+2. 用 git worktree 切換到 `demo` 分支（不存在時自動建立 orphan 分支），把 `dist/` 內容**攤平**到分支根目錄，並加上 `.nojekyll`（避免 GitHub Pages 跑 Jekyll）。
+3. commit 後 push 到 `origin/demo`，最後清理 worktree（不影響你目前在 `main` 的工作樹）。
+
+首次部署後，到 GitHub repo 設定一次 Pages 來源即可：
+
+**Settings → Pages → Build and deployment → Source: `Deploy from a branch` → Branch: `demo` / `(root)`**
+
+之後 demo 網址為 `https://<account>.github.io/<repo>/`（本專案為 `https://one-liang.github.io/tailwind-template/`）。因為輸出全為相對路徑，子路徑下也能正確載入頁面、CSS、圖片與頁面間連結。日後要更新 demo，只要再跑一次 `npm run deploy`。

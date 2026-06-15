@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev      # Vite 開發伺服器，網址 http://localhost:3000/（strictPort）
 npm run build    # 建置靜態網站到 dist/
 npm run preview  # 用 Node HTTP 預覽 dist/（預設 http://127.0.0.1:4173/，可用 PORT/HOST 覆寫）
+npm run deploy   # 重新 build，並把 dist/ 內容攤平發佈到 demo 分支供 GitHub Pages
 npm run check    # 執行測試、建置，再驗證 dist/ 輸出
 npm run format       # 用 Prettier 格式化整個專案（依 .prettierignore 排除）
 npm run format:check # 只檢查格式、不寫入（CI/把關用）
@@ -44,6 +45,8 @@ node --test --test-name-pattern "<substring>" tests/builder.test.mjs
 **Asset URL 改寫：** HTML 屬性（`src`/`href`/`poster`）與 CSS 的 `url(...)` 都會被改寫成指向 `dist/assets/` 下複製過去的 asset。只有解析後落在 `assetsDir`（`src/assets`）*內部*的 URL 才會被改寫；外部 URL、錨點與協定相對 URL 不予更動。引用 asset 可用 `@assets/...`、`/assets/...`，或相對於來源檔案的路徑。query/hash 後綴會被保留。
 
 **開發伺服器流程：** `createBuilderMiddleware` 會即時渲染頁面提供服務。它會公開虛擬 asset 路由 `/@builder/assets/css/<pageName>.css` 與 `/@builder/assets/js/<pageName>.js`（每次請求即時編譯），並從 `src/assets` 在 `/assets/...` 提供原始檔案。來源變更會觸發 full reload（無 HMR）。
+
+**部署（GitHub Pages）：** `scripts/deploy.mjs`（`npm run deploy`）先 `buildSite` 重新產生 `dist/`，再用 git worktree（建在 `.cache/deploy-worktree`）把 `dist/` 內容*攤平*到 `demo` 分支根目錄、加上 `.nojekyll`，commit 後 push 到 `origin/demo`，最後移除 worktree —— 全程不切換主工作樹、不把 `dist/` commit 進 `main`。`demo` 為 orphan 分支（不存在時自動建立；git < 2.42 用 detached worktree + `checkout --orphan` 的 fallback）。dist 輸出全為相對路徑（build 模式由 `rewriteHtmlAssetUrls` 改寫，頁面間連結為作者手寫相對連結），因此同一份輸出同時適用於 `file://` 直接開啟與 GitHub Pages 專案子路徑，無須 base 設定。Pages 來源設為 `demo` 分支 `/ (root)`。可用 `DEPLOY_BRANCH`、`DEPLOY_REMOTE` 覆寫。
 
 ## 設定檔
 
