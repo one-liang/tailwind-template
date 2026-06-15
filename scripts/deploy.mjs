@@ -7,9 +7,9 @@ import { buildSite, loadConfig } from "./builder-core.mjs";
 const rootDir = process.cwd();
 const branch = process.env.DEPLOY_BRANCH ?? "demo";
 const remote = process.env.DEPLOY_REMOTE ?? "origin";
-// 額外鏡像推送的 remote（預設 yunghsin → for-demo）。
-// 推送前會檢查 remote 是否存在，缺少時自動略過，因此乾淨 clone 上是安全的 no-op。
-const mirrorRemotes = (process.env.DEPLOY_MIRROR_REMOTES ?? "yunghsin")
+// 額外鏡像推送的 remote（預設無；demo 鏡像已移交給 one-liang/yunghsinwatch 專案負責）。
+// 需要時可用 DEPLOY_MIRROR_REMOTES 以逗號分隔指定；推送前會檢查 remote 是否存在，缺少時自動略過。
+const mirrorRemotes = (process.env.DEPLOY_MIRROR_REMOTES ?? "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
