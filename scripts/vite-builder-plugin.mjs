@@ -12,7 +12,7 @@ export function tailwindHtmlBuilder() {
         config.pageJsDir,
         config.componentJsDir,
         config.tailwindEntry,
-        `${config.rootDir}/builder.config.mjs`
+        `${config.rootDir}/builder.config.mjs`,
       ];
 
       for (const watchedPath of reloadRoots) {
@@ -28,6 +28,6 @@ export function tailwindHtmlBuilder() {
       });
 
       server.middlewares.use(createBuilderMiddleware(server.config.root).bind(server));
-    }
+    },
   };
 }

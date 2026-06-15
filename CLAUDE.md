@@ -9,6 +9,8 @@ npm run dev      # Vite 開發伺服器，網址 http://localhost:3000/（strict
 npm run build    # 建置靜態網站到 dist/
 npm run preview  # 用 Node HTTP 預覽 dist/（預設 http://127.0.0.1:4173/，可用 PORT/HOST 覆寫）
 npm run check    # 執行測試、建置，再驗證 dist/ 輸出
+npm run format       # 用 Prettier 格式化整個專案（依 .prettierignore 排除）
+npm run format:check # 只檢查格式、不寫入（CI/把關用）
 ```
 
 用 Node 內建測試執行器跑單一測試：
@@ -28,8 +30,9 @@ node --test --test-name-pattern "<substring>" tests/builder.test.mjs
 
 **頁面探索與輸出命名：** 頁面來源為 `src/pages/**/*.html`。輸出路徑會對應來源路徑，但推導出的 `pageName` 會用 `-` 把巢狀路徑*壓平*：`src/pages/news/detail.html` → `pageName` 為 `news-detail` → `dist/assets/css/news-detail.css` 與 `.../js/news-detail.js`。HTML 本身仍保留巢狀位置（`dist/news/detail.html`）。
 
-**組件模型：** HTML 中的 PascalCase 自閉合標籤會被就地展開。`<SiteBanner />` → slug `site-banner`（透過 `componentNameToSlug`）→ `src/components/site-banner/site-banner.html`，並可選用同目錄的 sidecar `site-banner.css` 以及 `src/js/component/site-banner.js`。組件會遞迴渲染（組件 HTML 內可再包含其他 component tag）。builder 強制的限制：
-- 只支援純自閉合標籤。帶屬性或內容的標籤（`<Header class="x">`、`<Footer>...`）會丟出錯誤（`assertNoUnsupportedComponentTags`）。不支援 props 或 slots。
+**組件模型：** HTML 中的 `c-` 前綴 kebab-case 自閉合標籤會被就地展開。`<c-site-banner />` → slug `site-banner`（去掉 `c-` 前綴）→ `src/components/site-banner/site-banner.html`，並可選用同目錄的 sidecar `site-banner.css` 以及 `src/js/component/site-banner.js`。組件會遞迴渲染（組件 HTML 內可再包含其他 component tag）。**標籤刻意採 `c-` 前綴的 custom-element 寫法**：連字號讓 Prettier 的 HTML parser 原樣保留標籤（PascalCase 會被小寫化而破壞偵測），因此來源 HTML 可以安全格式化。builder 強制的限制：
+
+- 只支援純自閉合標籤。帶屬性或內容的標籤（`<c-header class="x">`、`<c-footer>...`）會丟出錯誤（`assertNoUnsupportedComponentTags`）。不支援 props 或 slots。
 - 循環引用會丟出錯誤（透過 `componentStack` 追蹤）。
 - 缺少組件 HTML 會丟出錯誤；缺少 CSS/JS 則直接略過。
 - 每個組件的 CSS/JS 每頁最多只收集一次（透過 `seenCssFiles`/`seenJsFiles` 去重）。
@@ -51,5 +54,13 @@ node --test --test-name-pattern "<substring>" tests/builder.test.mjs
 
 - HTML 中優先使用 Tailwind utility classes。Sidecar CSS（頁面或組件）是處理 utility 無法表達情境的逃生口 —— 複雜 selector、keyframes、第三方樣式覆寫，或需要 `url(...)` asset 改寫的 CSS。
 - 全站設計 token 放在 `src/styles/tailwind.css` 的 `@theme`，共用且有語意的簡寫放在 `@utility`。
-- 組件目錄名稱用 kebab-case；標籤用 PascalCase。
+- 組件目錄名稱用 kebab-case；標籤用 `c-` 前綴的 kebab-case 自閉合 custom element（`<c-site-banner />`）。
 - `dist/` 與 `.cache/` 為產生物且已被 gitignore —— 請勿手動編輯。
+
+## 格式化（Prettier）
+
+- 設定在 `.prettierrc.json`（printWidth 100、2 空格、雙引號、有分號、`endOfLine: lf`），並啟用 `prettier-plugin-tailwindcss` 自動排序 class（透過 `tailwindStylesheet` 指向 `src/styles/tailwind.css` 以對應 v4 theme）。
+- **來源 HTML 也會格式化**：因為 component 標籤改用 `c-` 前綴 custom element（`<c-header />`），Prettier 會原樣保留(連字號標籤不會被小寫化)，所以 `src/**/*.html` 可安全納入格式化。`.css/.js/.mjs/.json` 同樣會格式化。
+- **dist/ 輸出會在 build 時格式化**：`buildSite` 在寫檔前以 Prettier 格式化 HTML/CSS/JS（`builder-core.mjs` 的 `formatOutput`，動態 import、僅 build 路徑使用，dev server 不受影響；格式化失敗會警告並退回原內容，不中斷 build）。dist HTML 已展開 component tag，故可安全格式化。
+- **存檔自動格式化**：`.vscode/settings.json` 開啟 format on save（需 Prettier 擴充套件，已列在 `.vscode/extensions.json`）；`.claude/settings.json` 另有 PostToolUse hook，Claude 編輯檔案後自動跑 Prettier。
+- **commit 前自動格式化**：原生 git hook `.githooks/pre-commit` 會格式化 staged 檔並重新 stage。`npm install` 的 `prepare` script 會設定 `git config core.hooksPath .githooks` 自動啟用。

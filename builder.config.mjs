@@ -5,5 +5,5 @@ export default {
   componentJsDir: "src/js/component",
   assetsDir: "src/assets",
   outDir: "dist",
-  componentTagPattern: "PascalCaseSelfClosing"
+  componentTagPattern: "CPrefixSelfClosing",
 };

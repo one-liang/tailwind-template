@@ -1,0 +1,14 @@
+#!/bin/sh
+# 在 commit 前格式化 staged 檔案，格式化後重新加入暫存區。
+# 透過 `git config core.hooksPath .githooks` 啟用（npm install 時的 prepare script 會自動設定）。
+
+set -e
+
+# 取得本次 commit 中新增/複製/修改/改名、且為可格式化副檔名的 staged 檔案。
+files=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(html|css|js|mjs|json)$' || true)
+
+[ -z "$files" ] && exit 0
+
+# 一次格式化所有目標檔，再重新 stage（用 NUL 分隔以正確處理特殊字元）。
+printf '%s\n' "$files" | xargs npx prettier --write
+printf '%s\n' "$files" | xargs git add

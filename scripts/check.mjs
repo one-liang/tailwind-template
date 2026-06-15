@@ -14,14 +14,30 @@ for (const pagePath of pages) {
   const html = await readFile(outputInfo.htmlOutputPath, "utf8");
   const css = await readFile(outputInfo.cssOutputPath, "utf8");
 
-  assert.ok(html.includes(`href="${outputInfo.cssHref}"`), `${outputInfo.pageRelative} should load page css`);
-  assert.doesNotMatch(html, /<[A-Z][A-Za-z0-9]*\s*\/>/, `${outputInfo.pageRelative} should not contain raw component tags`);
-  assert.ok(html.split(/\r?\n/).length > 5, `${outputInfo.pageRelative} html should keep readable newlines`);
-  assert.ok(css.split(/\r?\n/).length > 5, `${outputInfo.pageRelative} css should keep readable newlines`);
+  assert.ok(
+    html.includes(`href="${outputInfo.cssHref}"`),
+    `${outputInfo.pageRelative} should load page css`
+  );
+  assert.doesNotMatch(
+    html,
+    /<c-[a-z][a-z0-9-]*[\s/>]/,
+    `${outputInfo.pageRelative} should not contain raw component tags`
+  );
+  assert.ok(
+    html.split(/\r?\n/).length > 5,
+    `${outputInfo.pageRelative} html should keep readable newlines`
+  );
+  assert.ok(
+    css.split(/\r?\n/).length > 5,
+    `${outputInfo.pageRelative} css should keep readable newlines`
+  );
 
   if (html.includes(outputInfo.jsSrc)) {
     const js = await readFile(outputInfo.jsOutputPath, "utf8");
-    assert.ok(js.split(/\r?\n/).length > 2, `${outputInfo.pageRelative} js should keep readable newlines`);
+    assert.ok(
+      js.split(/\r?\n/).length > 2,
+      `${outputInfo.pageRelative} js should keep readable newlines`
+    );
   }
 }
 

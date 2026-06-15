@@ -6,11 +6,10 @@ import test from "node:test";
 
 import {
   buildPageJsText,
-  componentNameToSlug,
   loadConfig,
   renderPage,
   rewriteHtmlAssetUrls,
-  rewriteCssUrls
+  rewriteCssUrls,
 } from "../scripts/builder-core.mjs";
 
 async function makeFixture() {
@@ -24,56 +23,79 @@ async function makeFixture() {
   await mkdir(path.join(root, "src/assets/images"), { recursive: true });
   await mkdir(path.join(root, "src/assets/fonts"), { recursive: true });
 
-  await writeFile(path.join(root, "builder.config.mjs"), `
+  await writeFile(
+    path.join(root, "builder.config.mjs"),
+    `
 export default {
   pages: "src/pages/**/*.html",
   componentsDir: "src/components",
   assetsDir: "src/assets",
   outDir: "dist",
-  componentTagPattern: "PascalCaseSelfClosing"
+  componentTagPattern: "CPrefixSelfClosing"
 };
-`);
+`
+  );
 
-  await writeFile(path.join(root, "src/pages/index.html"), `<!doctype html>
+  await writeFile(
+    path.join(root, "src/pages/index.html"),
+    `<!doctype html>
 <html>
   <head>
     <!-- 保留 head 註解 -->
     <title>Home</title>
   </head>
   <body class="bg-white text-slate-900">
-    <Header />
+    <c-header />
     <main>Home</main>
     <!-- 保留 body 註解 -->
   </body>
 </html>
-`);
+`
+  );
 
-  await writeFile(path.join(root, "src/pages/about.html"), `<!doctype html>
+  await writeFile(
+    path.join(root, "src/pages/about.html"),
+    `<!doctype html>
 <html>
   <head><title>About</title></head>
-  <body><AppHeader /><main>About</main></body>
+  <body><c-app-header /><main>About</main></body>
 </html>
-`);
+`
+  );
 
-  await writeFile(path.join(root, "src/components/header/header.html"), `<header class="px-6 py-4">
-  <Nav />
+  await writeFile(
+    path.join(root, "src/components/header/header.html"),
+    `<header class="px-6 py-4">
+  <c-nav />
   <h1>Header</h1>
 </header>
-`);
-  await writeFile(path.join(root, "src/components/app-header/app-header.html"), `<header class="app-header">
+`
+  );
+  await writeFile(
+    path.join(root, "src/components/app-header/app-header.html"),
+    `<header class="app-header">
   <h1>App Header</h1>
 </header>
-`);
-  await writeFile(path.join(root, "src/components/nav/nav.html"), `<nav class="flex gap-4">
+`
+  );
+  await writeFile(
+    path.join(root, "src/components/nav/nav.html"),
+    `<nav class="flex gap-4">
   <a href="./index.html">Home</a>
 </nav>
-`);
-  await writeFile(path.join(root, "src/components/nav/nav.css"), `/* nav CSS 註解 */
+`
+  );
+  await writeFile(
+    path.join(root, "src/components/nav/nav.css"),
+    `/* nav CSS 註解 */
 .nav-logo {
   background-image: url("../../assets/images/logo.svg");
 }
-`);
-  await writeFile(path.join(root, "src/components/header/header.css"), `/* header CSS 註解 */
+`
+  );
+  await writeFile(
+    path.join(root, "src/components/header/header.css"),
+    `/* header CSS 註解 */
 .site-header {
   background: url("../../assets/images/header.png");
 }
@@ -81,32 +103,43 @@ export default {
   font-family: "Demo";
   src: url("../../assets/fonts/demo.woff2") format("woff2");
 }
-`);
-  await writeFile(path.join(root, "src/components/header/header.js"), `// header JS 註解
+`
+  );
+  await writeFile(
+    path.join(root, "src/components/header/header.js"),
+    `// header JS 註解
 window.headerLoaded = true;
-`);
-  await writeFile(path.join(root, "src/pages/index.css"), `/* 頁面 CSS 註解 */
+`
+  );
+  await writeFile(
+    path.join(root, "src/pages/index.css"),
+    `/* 頁面 CSS 註解 */
 .home-hero {
   color: black;
 }
-`);
-  await writeFile(path.join(root, "src/pages/index.js"), `// 頁面 JS 註解
+`
+  );
+  await writeFile(
+    path.join(root, "src/pages/index.js"),
+    `// 頁面 JS 註解
 window.pageLoaded = true;
-`);
-  await writeFile(path.join(root, "src/js/index.js"), `// 頁面 JS 註解
+`
+  );
+  await writeFile(
+    path.join(root, "src/js/index.js"),
+    `// 頁面 JS 註解
 window.pageLoaded = true;
-`);
-  await writeFile(path.join(root, "src/js/component/header.js"), `// header JS 註解
+`
+  );
+  await writeFile(
+    path.join(root, "src/js/component/header.js"),
+    `// header JS 註解
 window.headerLoaded = true;
-`);
+`
+  );
 
   return root;
 }
-
-test("maps PascalCase component tags to kebab-case component folders", () => {
-  assert.equal(componentNameToSlug("Header"), "header");
-  assert.equal(componentNameToSlug("AppHeader"), "app-header");
-});
 
 test("renders Vue-like component tags and collects component css/js in dependency order", async () => {
   const root = await makeFixture();
@@ -118,19 +151,23 @@ test("renders Vue-like component tags and collects component css/js in dependenc
     assert.match(result.html, /<!-- 保留 head 註解 -->/);
     assert.match(result.html, /<nav class="flex gap-4">/);
     assert.match(result.html, /<header class="px-6 py-4">/);
-    assert.doesNotMatch(result.html, /<Header\s*\/>/);
+    assert.doesNotMatch(result.html, /<c-header\s*\/>/);
     assert.deepEqual(
-      result.componentCssFiles.map((filePath) => path.relative(root, filePath).replaceAll("\\", "/")),
-      [
-        "src/components/nav/nav.css",
-        "src/components/header/header.css"
-      ]
+      result.componentCssFiles.map((filePath) =>
+        path.relative(root, filePath).replaceAll("\\", "/")
+      ),
+      ["src/components/nav/nav.css", "src/components/header/header.css"]
     );
     assert.deepEqual(
-      result.componentJsFiles.map((filePath) => path.relative(root, filePath).replaceAll("\\", "/")),
+      result.componentJsFiles.map((filePath) =>
+        path.relative(root, filePath).replaceAll("\\", "/")
+      ),
       ["src/js/component/header.js"]
     );
-    assert.equal(path.relative(root, result.pageCssFile).replaceAll("\\", "/"), "src/pages/index.css");
+    assert.equal(
+      path.relative(root, result.pageCssFile).replaceAll("\\", "/"),
+      "src/pages/index.css"
+    );
     assert.equal(path.relative(root, result.pageJsFile).replaceAll("\\", "/"), "src/js/index.js");
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -164,7 +201,7 @@ test("renders multi-word components using kebab-case folder names", async () => 
     const result = await renderPage(path.join(root, "src/pages/about.html"), config);
 
     assert.match(result.html, /<header class="app-header">/);
-    assert.doesNotMatch(result.html, /<AppHeader\s*\/>/);
+    assert.doesNotMatch(result.html, /<c-app-header\s*\/>/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -174,7 +211,7 @@ test("detects circular component references", async () => {
   const root = await makeFixture();
 
   try {
-    await writeFile(path.join(root, "src/components/nav/nav.html"), `<Header />`);
+    await writeFile(path.join(root, "src/components/nav/nav.html"), `<c-header />`);
     const config = await loadConfig(root);
 
     await assert.rejects(
@@ -197,7 +234,7 @@ test("rewrites component css asset urls relative to generated page css", async (
       sourceCssPath: cssPath,
       rootDir: root,
       assetsDir: path.join(root, "src/assets"),
-      outputCssPath: path.join(root, "dist/assets/css/index.css")
+      outputCssPath: path.join(root, "dist/assets/css/index.css"),
     });
 
     assert.match(rewritten, /url\("\.\.\/images\/header\.png"\)/);
@@ -218,7 +255,7 @@ test("rewrites html asset urls for direct-open dist pages", async () => {
       rootDir: root,
       assetsDir: path.join(root, "src/assets"),
       targetHtmlPath: path.join(root, "dist/about/team.html"),
-      mode: "build"
+      mode: "build",
     });
 
     assert.equal(rewritten, `<img src="../assets/images/logo.svg" alt="Logo">`);

@@ -1,32 +1,21 @@
 import { spawnSync } from "node:child_process";
-import {
-  constants,
-  cp,
-  mkdir,
-  readFile,
-  readdir,
-  rm,
-  stat,
-  writeFile
-} from "node:fs/promises";
+import { constants, cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { accessSync, createReadStream, existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const HTML_COMPONENT_TAG_RE = /<([A-Z][A-Za-z0-9]*)\s*\/>/g;
-const HTML_UNSUPPORTED_COMPONENT_TAG_RE = /<([A-Z][A-Za-z0-9]*)\b(?!\s*\/>)[^>]*>/g;
+// 組件標籤採 `c-` 前綴的 kebab-case custom element（如 <c-header />、<c-site-banner />）。
+// 連字號讓 Prettier 的 HTML parser 原樣保留標籤（不會像 PascalCase 那樣被小寫化），
+// 因此來源 HTML 可以安全格式化。擷取群組為去掉 `c-` 後的 slug，直接對應組件資料夾。
+const HTML_COMPONENT_TAG_RE = /<c-([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\s*\/>/g;
+// 匹配任何 <c-名稱…> 開標籤（到第一個 > 為止）；group 2 是名稱與 > 之間的內容，
+// 用來判斷是否為合法的純自閉合形式（trim 後應為 "/"），否則視為不支援語法。
+const HTML_ANY_COMPONENT_TAG_RE = /<c-([a-z][a-z0-9]*(?:-[a-z0-9]+)*)([^>]*)>/g;
 const CSS_URL_RE = /url\(\s*(["']?)([^"')]+)\1\s*\)/g;
 const HTML_ASSET_ATTR_RE = /\b(src|href|poster)=("([^"]*)"|'([^']*)')/g;
 
 export function normalizePath(filePath) {
   return filePath.split(path.sep).join("/");
-}
-
-export function componentNameToSlug(componentName) {
-  return componentName
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1-$2")
-    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
-    .toLowerCase();
 }
 
 export async function loadConfig(rootDir = process.cwd()) {
@@ -46,8 +35,8 @@ export async function loadConfig(rootDir = process.cwd()) {
     componentJsDir: path.resolve(rootDir, rawConfig.componentJsDir ?? "src/js/component"),
     assetsDir: path.resolve(rootDir, rawConfig.assetsDir ?? "src/assets"),
     outDir: path.resolve(rootDir, rawConfig.outDir ?? "dist"),
-    componentTagPattern: rawConfig.componentTagPattern ?? "PascalCaseSelfClosing",
-    tailwindEntry: path.resolve(rootDir, rawConfig.tailwindEntry ?? "src/styles/tailwind.css")
+    componentTagPattern: rawConfig.componentTagPattern ?? "CPrefixSelfClosing",
+    tailwindEntry: path.resolve(rootDir, rawConfig.tailwindEntry ?? "src/styles/tailwind.css"),
   };
 }
 
@@ -59,10 +48,7 @@ export async function discoverPages(config) {
 export function getPageOutputInfo(pagePath, config) {
   const pageRelative = path.relative(config.pagesDir, pagePath);
   const htmlOutputPath = path.join(config.outDir, pageRelative);
-  const pageName = pageRelative
-    .replace(path.extname(pageRelative), "")
-    .split(path.sep)
-    .join("-");
+  const pageName = pageRelative.replace(path.extname(pageRelative), "").split(path.sep).join("-");
   const cssOutputPath = path.join(config.outDir, "assets", "css", `${pageName}.css`);
   const jsOutputPath = path.join(config.outDir, "assets", "js", `${pageName}.js`);
 
@@ -73,7 +59,7 @@ export function getPageOutputInfo(pagePath, config) {
     cssOutputPath,
     jsOutputPath,
     cssHref: toHtmlRelativeUrl(path.dirname(htmlOutputPath), cssOutputPath),
-    jsSrc: toHtmlRelativeUrl(path.dirname(htmlOutputPath), jsOutputPath)
+    jsSrc: toHtmlRelativeUrl(path.dirname(htmlOutputPath), jsOutputPath),
   };
 }
 
@@ -86,7 +72,7 @@ export async function renderPage(pagePath, config, options = {}) {
     componentJsFiles: [],
     seenCssFiles: new Set(),
     seenJsFiles: new Set(),
-    componentStack: []
+    componentStack: [],
   };
   const rewrittenHtml = rewriteHtmlAssetUrlsForOptions(html, pagePath, config, options);
   const renderedHtml = await renderHtml(rewrittenHtml, context, pagePath);
@@ -99,8 +85,23 @@ export async function renderPage(pagePath, config, options = {}) {
     componentCssFiles: context.componentCssFiles,
     componentJsFiles: context.componentJsFiles,
     pageCssFile,
-    pageJsFile
+    pageJsFile,
   };
+}
+
+// 用 Prettier 格式化最終輸出字串。僅在 build 流程（buildSite）中呼叫，
+// 採動態 import 以避免 dev server / middleware 載入 prettier。
+// 格式化失敗時警告並回傳原字串，確保 build 不會中斷、頁面不出錯。
+async function formatOutput(content, parser, rootDir) {
+  if (!content || !content.trim()) return content;
+  try {
+    const prettier = await import("prettier");
+    const options = (await prettier.resolveConfig(path.join(rootDir, ".prettierrc.json"))) ?? {};
+    return await prettier.format(content, { ...options, parser });
+  } catch (error) {
+    console.warn(`格式化輸出失敗（${parser}），改用未格式化內容：${error.message}`);
+    return content;
+  }
 }
 
 export async function buildSite(rootDir = process.cwd()) {
@@ -116,24 +117,36 @@ export async function buildSite(rootDir = process.cwd()) {
     const outputInfo = getPageOutputInfo(pagePath, config);
     const rendered = await renderPage(pagePath, config, {
       htmlAssetMode: "build",
-      targetHtmlPath: outputInfo.htmlOutputPath
+      targetHtmlPath: outputInfo.htmlOutputPath,
     });
     const css = await buildPageCssText(rendered, config, outputInfo);
     const js = await buildPageJsText(rendered, config);
     const html = injectPageAssets(rendered.html, {
       cssHref: outputInfo.cssHref,
-      jsSrc: js.trim() ? outputInfo.jsSrc : null
+      jsSrc: js.trim() ? outputInfo.jsSrc : null,
     });
 
     await mkdir(path.dirname(outputInfo.htmlOutputPath), { recursive: true });
     await mkdir(path.dirname(outputInfo.cssOutputPath), { recursive: true });
     await mkdir(path.dirname(outputInfo.jsOutputPath), { recursive: true });
 
-    await writeFile(outputInfo.htmlOutputPath, html, "utf8");
-    await writeFile(outputInfo.cssOutputPath, css, "utf8");
+    await writeFile(
+      outputInfo.htmlOutputPath,
+      await formatOutput(html, "html", config.rootDir),
+      "utf8"
+    );
+    await writeFile(
+      outputInfo.cssOutputPath,
+      await formatOutput(css, "css", config.rootDir),
+      "utf8"
+    );
 
     if (js.trim()) {
-      await writeFile(outputInfo.jsOutputPath, js, "utf8");
+      await writeFile(
+        outputInfo.jsOutputPath,
+        await formatOutput(js, "babel", config.rootDir),
+        "utf8"
+      );
     }
 
     builtPages.push({ ...outputInfo, rendered, hasJs: Boolean(js.trim()) });
@@ -151,7 +164,7 @@ export async function renderDevHtml(urlPathname, config, server) {
   const js = await buildPageJsText(rendered, config);
   const html = injectPageAssets(rendered.html, {
     cssHref: `/@builder/assets/css/${outputInfo.pageName}.css`,
-    jsSrc: js.trim() ? `/@builder/assets/js/${outputInfo.pageName}.js` : null
+    jsSrc: js.trim() ? `/@builder/assets/js/${outputInfo.pageName}.js` : null,
   });
 
   if (server) {
@@ -186,25 +199,29 @@ export async function buildPageCssText(renderedPage, config, outputInfo) {
   for (const cssPath of renderedPage.componentCssFiles) {
     const css = await readFile(cssPath, "utf8");
     chunks.push(sectionComment(`組件: ${path.relative(config.rootDir, cssPath)}`));
-    chunks.push(rewriteCssUrls({
-      css,
-      sourceCssPath: cssPath,
-      rootDir: config.rootDir,
-      assetsDir: config.assetsDir,
-      outputCssPath: outputInfo.cssOutputPath
-    }).trimEnd());
+    chunks.push(
+      rewriteCssUrls({
+        css,
+        sourceCssPath: cssPath,
+        rootDir: config.rootDir,
+        assetsDir: config.assetsDir,
+        outputCssPath: outputInfo.cssOutputPath,
+      }).trimEnd()
+    );
   }
 
   if (renderedPage.pageCssFile) {
     const css = await readFile(renderedPage.pageCssFile, "utf8");
     chunks.push(sectionComment(`頁面: ${path.relative(config.rootDir, renderedPage.pageCssFile)}`));
-    chunks.push(rewriteCssUrls({
-      css,
-      sourceCssPath: renderedPage.pageCssFile,
-      rootDir: config.rootDir,
-      assetsDir: config.assetsDir,
-      outputCssPath: outputInfo.cssOutputPath
-    }).trimEnd());
+    chunks.push(
+      rewriteCssUrls({
+        css,
+        sourceCssPath: renderedPage.pageCssFile,
+        rootDir: config.rootDir,
+        assetsDir: config.assetsDir,
+        outputCssPath: outputInfo.cssOutputPath,
+      }).trimEnd()
+    );
   }
 
   return `${chunks.filter(Boolean).join("\n\n")}\n`;
@@ -233,12 +250,13 @@ export function rewriteCssUrls({ css, sourceCssPath, rootDir, assetsDir, outputC
     const resolved = resolveLocalAssetUrl(rawUrl, sourceCssPath, rootDir, assetsDir);
     if (!resolved) return match;
 
-    const relativeUrl = toHtmlRelativeUrl(
-      path.dirname(outputCssPath),
-      path.join(path.dirname(outputCssPath), "..", path.relative(assetsDir, resolved.filePath))
-    ) + resolved.suffix;
+    const relativeUrl =
+      toHtmlRelativeUrl(
+        path.dirname(outputCssPath),
+        path.join(path.dirname(outputCssPath), "..", path.relative(assetsDir, resolved.filePath))
+      ) + resolved.suffix;
 
-    return `url(${quote || "\""}${relativeUrl}${quote || "\""})`;
+    return `url(${quote || '"'}${relativeUrl}${quote || '"'})`;
   });
 }
 
@@ -249,25 +267,28 @@ export function rewriteHtmlAssetUrls({
   assetsDir,
   targetHtmlPath,
   mode,
-  outDir = path.join(rootDir, "dist")
+  outDir = path.join(rootDir, "dist"),
 }) {
-  return html.replace(HTML_ASSET_ATTR_RE, (match, attrName, quotedValue, doubleValue, singleValue) => {
-    const value = doubleValue ?? singleValue ?? "";
-    const quote = quotedValue.startsWith("'") ? "'" : "\"";
-    const resolved = resolveLocalAssetUrl(value, sourceHtmlPath, rootDir, assetsDir);
-    if (!resolved) return match;
+  return html.replace(
+    HTML_ASSET_ATTR_RE,
+    (match, attrName, quotedValue, doubleValue, singleValue) => {
+      const value = doubleValue ?? singleValue ?? "";
+      const quote = quotedValue.startsWith("'") ? "'" : '"';
+      const resolved = resolveLocalAssetUrl(value, sourceHtmlPath, rootDir, assetsDir);
+      if (!resolved) return match;
 
-    const assetRelative = normalizePath(path.relative(assetsDir, resolved.filePath));
+      const assetRelative = normalizePath(path.relative(assetsDir, resolved.filePath));
 
-    if (mode === "dev") {
-      return `${attrName}=${quote}/assets/${assetRelative}${resolved.suffix}${quote}`;
+      if (mode === "dev") {
+        return `${attrName}=${quote}/assets/${assetRelative}${resolved.suffix}${quote}`;
+      }
+
+      const outputAssetPath = path.join(outDir, "assets", assetRelative);
+      const buildUrl = `${toHtmlRelativeUrl(path.dirname(targetHtmlPath), outputAssetPath)}${resolved.suffix}`;
+
+      return `${attrName}=${quote}${buildUrl}${quote}`;
     }
-
-    const outputAssetPath = path.join(outDir, "assets", assetRelative);
-    const buildUrl = `${toHtmlRelativeUrl(path.dirname(targetHtmlPath), outputAssetPath)}${resolved.suffix}`;
-
-    return `${attrName}=${quote}${buildUrl}${quote}`;
-  });
+  );
 }
 
 export function injectPageAssets(html, { cssHref, jsSrc }) {
@@ -297,11 +318,11 @@ export async function findPageByUrl(urlPathname, config) {
   const relativePath = cleanPath === "" ? "index.html" : cleanPath;
   const candidates = [
     path.join(config.pagesDir, relativePath),
-    path.join(config.pagesDir, relativePath, "index.html")
+    path.join(config.pagesDir, relativePath, "index.html"),
   ];
 
   for (const candidate of candidates) {
-    if (await fileExists(candidate) && candidate.endsWith(".html")) {
+    if ((await fileExists(candidate)) && candidate.endsWith(".html")) {
       return candidate;
     }
   }
@@ -311,7 +332,9 @@ export async function findPageByUrl(urlPathname, config) {
 
 export async function findPageByName(pageName, config) {
   const pages = await discoverPages(config);
-  return pages.find((pagePath) => getPageOutputInfo(pagePath, config).pageName === pageName) ?? null;
+  return (
+    pages.find((pagePath) => getPageOutputInfo(pagePath, config).pageName === pageName) ?? null
+  );
 }
 
 export function contentTypeFor(filePath) {
@@ -335,7 +358,7 @@ export function contentTypeFor(filePath) {
     ".webm": "video/webm",
     ".webp": "image/webp",
     ".woff": "font/woff",
-    ".woff2": "font/woff2"
+    ".woff2": "font/woff2",
   };
 
   return types[ext] ?? "application/octet-stream";
@@ -415,24 +438,30 @@ async function renderHtml(html, context, sourceHtmlPath) {
   return rendered;
 }
 
-async function renderComponent(componentName, context) {
-  const slug = componentNameToSlug(componentName);
+async function renderComponent(slug, context) {
   if (context.componentStack.includes(slug)) {
-    throw new Error(`Circular component reference: ${[...context.componentStack, slug].join(" -> ")}`);
+    throw new Error(
+      `Circular component reference: ${[...context.componentStack, slug].join(" -> ")}`
+    );
   }
 
   const componentDir = path.join(context.config.componentsDir, slug);
   const componentHtmlPath = path.join(componentDir, `${slug}.html`);
   if (!(await fileExists(componentHtmlPath))) {
-    throw new Error(`Component <${componentName} /> not found at ${componentHtmlPath}`);
+    throw new Error(`Component <c-${slug} /> not found at ${componentHtmlPath}`);
   }
 
   const html = await readFile(componentHtmlPath, "utf8");
   const childContext = {
     ...context,
-    componentStack: [...context.componentStack, slug]
+    componentStack: [...context.componentStack, slug],
   };
-  const rewrittenHtml = rewriteHtmlAssetUrlsForOptions(html, componentHtmlPath, context.config, context.options);
+  const rewrittenHtml = rewriteHtmlAssetUrlsForOptions(
+    html,
+    componentHtmlPath,
+    context.config,
+    context.options
+  );
   const renderedHtml = await renderHtml(rewrittenHtml, childContext, componentHtmlPath);
   const cssFile = path.join(componentDir, `${slug}.css`);
   const jsFile = path.join(context.config.componentJsDir, `${slug}.js`);
@@ -444,11 +473,13 @@ async function renderComponent(componentName, context) {
 }
 
 function assertNoUnsupportedComponentTags(html, sourceHtmlPath) {
-  const unsupportedComponentTagRe = new RegExp(HTML_UNSUPPORTED_COMPONENT_TAG_RE.source, "g");
-  const match = unsupportedComponentTagRe.exec(html);
-  if (match) {
+  const anyComponentTagRe = new RegExp(HTML_ANY_COMPONENT_TAG_RE.source, "g");
+  let match;
+  while ((match = anyComponentTagRe.exec(html)) !== null) {
+    // 合法的純自閉合標籤，名稱與 > 之間只會是 "/"（如 <c-header /> → " /" → "/"）。
+    if (match[2].trim() === "/") continue;
     throw new Error(
-      `Unsupported component syntax <${match[1]}> in ${sourceHtmlPath}. Use pure self-closing tags like <${match[1]} />.`
+      `Unsupported component syntax <c-${match[1]}${match[2]}> in ${sourceHtmlPath}. Use pure self-closing tags like <c-${match[1]} />.`
     );
   }
 }
@@ -463,7 +494,7 @@ function rewriteHtmlAssetUrlsForOptions(html, sourceHtmlPath, config, options) {
     assetsDir: config.assetsDir,
     targetHtmlPath: options.targetHtmlPath,
     mode: options.htmlAssetMode,
-    outDir: config.outDir
+    outDir: config.outDir,
   });
 }
 
@@ -487,14 +518,20 @@ async function compileTailwindCss(renderedPage, config, pageName) {
   await writeFile(inputCssPath, await createTailwindInput(config, sourceHtmlPath), "utf8");
 
   const cliPath = findTailwindCli(config.rootDir);
-  const result = spawnSync(cliPath.command, [...cliPath.args, "-i", inputCssPath, "-o", outputCssPath], {
-    cwd: config.rootDir,
-    encoding: "utf8",
-    shell: false
-  });
+  const result = spawnSync(
+    cliPath.command,
+    [...cliPath.args, "-i", inputCssPath, "-o", outputCssPath],
+    {
+      cwd: config.rootDir,
+      encoding: "utf8",
+      shell: false,
+    }
+  );
 
   if (result.status !== 0) {
-    throw new Error(`Tailwind CSS build failed:\n${result.error?.message ?? ""}\n${result.stdout ?? ""}\n${result.stderr ?? ""}`);
+    throw new Error(
+      `Tailwind CSS build failed:\n${result.error?.message ?? ""}\n${result.stdout ?? ""}\n${result.stderr ?? ""}`
+    );
   }
 
   return readFile(outputCssPath, "utf8");
@@ -507,12 +544,27 @@ async function createTailwindInput(config, sourceHtmlPath) {
     tailwindEntry = await readFile(config.tailwindEntry, "utf8");
     tailwindEntry = tailwindEntry.replace(
       /@import\s+(["'])tailwindcss\1\s*;/,
-      "@import \"tailwindcss\" source(none);"
+      '@import "tailwindcss" source(none);'
     );
   }
 
-  const sourcePath = normalizePath(path.relative(path.dirname(path.join(config.rootDir, ".cache", "tailwind")), sourceHtmlPath));
-  const localSourcePath = normalizePath(path.relative(path.dirname(path.join(config.rootDir, ".cache", "tailwind", path.basename(path.dirname(sourceHtmlPath)), "input.css")), sourceHtmlPath));
+  const sourcePath = normalizePath(
+    path.relative(path.dirname(path.join(config.rootDir, ".cache", "tailwind")), sourceHtmlPath)
+  );
+  const localSourcePath = normalizePath(
+    path.relative(
+      path.dirname(
+        path.join(
+          config.rootDir,
+          ".cache",
+          "tailwind",
+          path.basename(path.dirname(sourceHtmlPath)),
+          "input.css"
+        )
+      ),
+      sourceHtmlPath
+    )
+  );
 
   return `${tailwindEntry.trimEnd()}\n@source "${localSourcePath}";\n`;
 }
@@ -526,7 +578,7 @@ function findTailwindCli(rootDir) {
 
   return {
     command: process.platform === "win32" ? "npx.cmd" : "npx",
-    args: ["@tailwindcss/cli"]
+    args: ["@tailwindcss/cli"],
   };
 }
 
@@ -535,7 +587,7 @@ async function copyAssets(config) {
 
   await cp(config.assetsDir, path.join(config.outDir, "assets"), {
     recursive: true,
-    force: true
+    force: true,
   });
 }
 
@@ -548,7 +600,7 @@ async function walkFiles(dir, extension) {
   for (const entry of entries) {
     const entryPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      files.push(...await walkFiles(entryPath, extension));
+      files.push(...(await walkFiles(entryPath, extension)));
     } else if (entry.isFile() && entry.name.endsWith(extension)) {
       files.push(entryPath);
     }
@@ -559,7 +611,7 @@ async function walkFiles(dir, extension) {
 
 async function sidecarFile(filePath, extension) {
   const candidate = filePath.replace(path.extname(filePath), extension);
-  return await fileExists(candidate) ? candidate : null;
+  return (await fileExists(candidate)) ? candidate : null;
 }
 
 async function pageJsFileForPage(pagePath, config) {
@@ -567,7 +619,7 @@ async function pageJsFileForPage(pagePath, config) {
   const pageScriptRelative = pageRelative.replace(path.extname(pageRelative), ".js");
   const candidate = path.join(config.pageJsDir, pageScriptRelative);
 
-  return await fileExists(candidate) ? candidate : null;
+  return (await fileExists(candidate)) ? candidate : null;
 }
 
 async function addExistingFile(filePath, list, seen) {
@@ -609,7 +661,8 @@ function resolveLocalAssetUrl(rawUrl, sourceFilePath, rootDir, assetsDir) {
   }
 
   const relativeToAssets = path.relative(assetsDir, resolved);
-  const isInsideAssets = relativeToAssets && !relativeToAssets.startsWith("..") && !path.isAbsolute(relativeToAssets);
+  const isInsideAssets =
+    relativeToAssets && !relativeToAssets.startsWith("..") && !path.isAbsolute(relativeToAssets);
   const isAssetsRoot = path.resolve(resolved) === path.resolve(assetsDir);
 
   if (!isInsideAssets && !isAssetsRoot) return null;
@@ -620,7 +673,9 @@ function resolveLocalAssetUrl(rawUrl, sourceFilePath, rootDir, assetsDir) {
 function splitUrlSuffix(url) {
   const hashIndex = url.indexOf("#");
   const queryIndex = url.indexOf("?");
-  const suffixIndex = [hashIndex, queryIndex].filter((index) => index >= 0).sort((a, b) => a - b)[0];
+  const suffixIndex = [hashIndex, queryIndex]
+    .filter((index) => index >= 0)
+    .sort((a, b) => a - b)[0];
 
   if (suffixIndex === undefined) return [url, ""];
   return [url.slice(0, suffixIndex), url.slice(suffixIndex)];

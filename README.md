@@ -1,6 +1,6 @@
 # Tailwind HTML Template
 
-這是一個以 Vite + Tailwind CSS v4 製作的靜態 HTML 範本。它支援類 Vue 的自閉合組件標籤，例如 `<Header />`，並在開發與建置時自動組合頁面 HTML、Tailwind CSS、組件 CSS、頁面 CSS、組件 JS 與頁面 JS。
+這是一個以 Vite + Tailwind CSS v4 製作的靜態 HTML 範本。它支援類 Vue 的自閉合組件標籤，例如 `<c-header />`，並在開發與建置時自動組合頁面 HTML、Tailwind CSS、組件 CSS、頁面 CSS、組件 JS 與頁面 JS。
 
 ## 環境需求
 
@@ -65,14 +65,13 @@ src/pages/contact.html -> src/js/contact.js
 
 ## 組件
 
-頁面可以使用 PascalCase 自閉合組件標籤：
+頁面可以使用 `c-` 前綴的 kebab-case 自閉合組件標籤：
 
 ```html
-<Header />
-<Footer />
+<c-header /> <c-footer />
 ```
 
-`<Header />` 會對應到：
+`<c-header />` 會對應到：
 
 ```text
 src/components/header/header.html
@@ -80,7 +79,7 @@ src/components/header/header.css
 src/js/component/header.js
 ```
 
-`<Footer />` 會對應到：
+`<c-footer />` 會對應到：
 
 ```text
 src/components/footer/footer.html
@@ -88,12 +87,12 @@ src/components/footer/footer.css
 src/js/component/footer.js
 ```
 
-`header.css`、`footer.css` 與 component JS 都是選用檔案；不存在時 builder 會略過。多字組件會自動轉成 kebab-case，例如 `<SiteBanner />` 會尋找 `src/components/site-banner/site-banner.html`。
+`header.css`、`footer.css` 與 component JS 都是選用檔案；不存在時 builder 會略過。多字組件用 kebab-case，例如 `<c-site-banner />` 會尋找 `src/components/site-banner/site-banner.html`（slug 即標籤去掉 `c-` 前綴）。
 
-目前組件語法只支援純自閉合標籤，不支援 props 或 slots：
+組件標籤刻意採 `c-` 前綴的 custom-element 寫法：連字號讓 Prettier 不會把標籤小寫化，來源 HTML 因此能安全格式化。語法只支援純自閉合標籤，不支援 props 或 slots：
 
 ```html
-<Header />
+<c-header />
 ```
 
 ## CSS 管理方式
@@ -129,8 +128,8 @@ src/pages/news/detail.html  -> src/js/news/detail.js
 組件 JS 放在 `src/js/component`：
 
 ```text
-<Header /> -> src/js/component/header.js
-<Footer /> -> src/js/component/footer.js
+<c-header /> -> src/js/component/header.js
+<c-footer /> -> src/js/component/footer.js
 ```
 
 如果頁面或組件沒有互動需求，就不要建立 JS 檔。空 JS 或只設定未被使用的 dataset 會讓輸出多出不必要的 script。
