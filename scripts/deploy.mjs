@@ -45,9 +45,37 @@ function branchExists() {
   return gitQuiet(["show-ref", "--verify", "--quiet", `refs/remotes/${remote}/${branch}`]);
 }
 
+// 從 git 遠端網址推導 GitHub Pages base URL，解析失敗時退回相對連結
+function pagesBaseUrl() {
+  let url;
+  try {
+    url = git(["config", "--get", `remote.${remote}.url`], { capture: true }).trim();
+  } catch {
+    return null;
+  }
+  const match = url.match(/github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/i);
+  if (!match) return null;
+  const [, owner, repo] = match;
+  if (repo.toLowerCase() === `${owner.toLowerCase()}.github.io`) {
+    return `https://${owner}.github.io/`;
+  }
+  return `https://${owner}.github.io/${repo}/`;
+}
+
+// 產生 demo 分支的 README（決定性內容，維持無變更則跳過的 idempotency）
+function renderReadme(builtPages, baseUrl) {
+  const lines = ["# 頁面 demo 連結", ""];
+  for (const page of builtPages) {
+    const route = page.pageRelative.split(path.sep).join("/");
+    const href = baseUrl ? `${baseUrl}${route}` : `./${route}`;
+    lines.push(`- [${route}](${href})`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 // 1. 重新建置 dist/
 console.log("building site...");
-await buildSite(rootDir);
+const { pages } = await buildSite(rootDir);
 const config = await loadConfig(rootDir);
 const outDir = config.outDir;
 
@@ -79,7 +107,10 @@ try {
   // 5. 避免 GitHub Pages 跑 Jekyll
   await writeFile(path.join(worktreeDir, ".nojekyll"), "");
 
-  // 6. commit + push（無變更則跳過）
+  // 5b. 產生列出各頁 demo 連結的 README.md
+  await writeFile(path.join(worktreeDir, "README.md"), renderReadme(pages, pagesBaseUrl()));
+
+  // 6. commit（內容有變更才產生新 commit）
   execFileSync("git", ["add", "-A"], { cwd: worktreeDir, stdio: "inherit", shell: false });
   const status = execFileSync("git", ["status", "--porcelain"], {
     cwd: worktreeDir,
@@ -88,7 +119,7 @@ try {
   });
 
   if (status.trim() === "") {
-    console.log("no changes to deploy.");
+    console.log("demo 內容無變更，沿用現有 commit。");
   } else {
     const message = `deploy: ${new Date().toISOString()}`;
     execFileSync("git", ["commit", "-m", message], {
@@ -96,29 +127,25 @@ try {
       stdio: "inherit",
       shell: false,
     });
-    execFileSync("git", ["push", "-u", remote, branch], {
+    console.log("committed demo update.");
+  }
+
+  // 7. 推送到 origin 與所有 mirror（每次都同步；已最新時 git 回報 up-to-date，為安全 no-op，
+  //    因此即使 origin 沒新 commit、落後的 mirror 也會被補上）
+  const targets = [remote, ...mirrorRemotes.filter((mirror) => mirror !== remote)];
+  for (const target of targets) {
+    if (!gitQuiet(["remote", "get-url", target])) {
+      console.log(`remote "${target}" not configured, skipped.`);
+      continue;
+    }
+    execFileSync("git", ["push", "-u", target, branch], {
       cwd: worktreeDir,
       stdio: "inherit",
       shell: false,
     });
-    console.log(`deployed to ${remote}/${branch}.`);
-
-    // 鏡像推送同一份 demo 分支到額外 remote（如 for-demo）
-    for (const mirror of mirrorRemotes) {
-      if (mirror === remote) continue;
-      if (!gitQuiet(["remote", "get-url", mirror])) {
-        console.log(`mirror remote "${mirror}" not configured, skipped.`);
-        continue;
-      }
-      execFileSync("git", ["push", "-u", mirror, branch], {
-        cwd: worktreeDir,
-        stdio: "inherit",
-        shell: false,
-      });
-      console.log(`mirrored to ${mirror}/${branch}.`);
-    }
+    console.log(`pushed to ${target}/${branch}.`);
   }
 } finally {
-  // 7. 清理 worktree
+  // 8. 清理 worktree
   await cleanupWorktree();
 }
